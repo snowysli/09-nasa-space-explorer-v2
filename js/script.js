@@ -13,6 +13,8 @@ document.addEventListener('DOMContentLoaded', () => {
   const button = document.getElementById('getImageBtn');
   const gallery = document.getElementById('gallery');
   const didYouKnow = document.getElementById('didYouKnow');
+  const startDateInput = document.getElementById('start-date');
+  const endDateInput = document.getElementById('end-date');
   // Optional API key input (not required by the starter HTML).
   const apiKeyInput = document.getElementById('api-key');
 
@@ -61,24 +63,138 @@ document.addEventListener('DOMContentLoaded', () => {
     `;
 
     try {
+      // Determine date range user requested (if any)
+      const startVal = startDateInput && startDateInput.value ? startDateInput.value : '';
+      const endVal = endDateInput && endDateInput.value ? endDateInput.value : '';
+
+      // Helper: robust date parsing. Accepts YYYY-MM-DD, ISO strings, or other Date-parsable values.
+      // Returns a Date set to UTC midnight for the parsed day, or null if parsing fails.
+      function parseAnyDate(str) {
+        if (!str) return null;
+        // Fast path: strict YYYY-MM-DD from input elements
+        const ymd = /^\s*(\d{4})-(\d{2})-(\d{2})\s*$/.exec(str);
+        if (ymd) {
+          const y = Number(ymd[1]);
+          const m = Number(ymd[2]);
+          const d = Number(ymd[3]);
+          return new Date(Date.UTC(y, m - 1, d));
+        }
+
+        // Try Date parsing for ISO or other formats
+        const parsed = new Date(str);
+        if (isNaN(parsed.getTime())) return null;
+        return new Date(Date.UTC(parsed.getUTCFullYear(), parsed.getUTCMonth(), parsed.getUTCDate()));
+      }
+
+      // Helper: format Date -> YYYY-MM-DD (UTC)
+      function formatDateYMD(date) {
+        const y = date.getUTCFullYear();
+        const m = String(date.getUTCMonth() + 1).padStart(2, '0');
+        const d = String(date.getUTCDate()).padStart(2, '0');
+        return `${y}-${m}-${d}`;
+      }
+
+      function addDays(date, days) {
+        const d = new Date(date.getTime());
+        d.setUTCDate(d.getUTCDate() + days);
+        return d;
+      }
+
+      // Compute a sensible range for requests. If user supplied only one date, expand to 9 days.
+  let startDate = parseAnyDate(startVal);
+  let endDate = parseAnyDate(endVal);
+      if (startDate && !endDate) {
+        endDate = addDays(startDate, 8);
+      } else if (!startDate && endDate) {
+        startDate = addDays(endDate, -8);
+      }
+
+      // If both supplied but start > end, swap them
+      if (startDate && endDate && startDate.getTime() > endDate.getTime()) {
+        const tmp = startDate; startDate = endDate; endDate = tmp;
+      }
+      // For debugging/informative message - human readable dates for the range
+      const startDisplay = startDate ? formatDateYMD(startDate) : '';
+      const endDisplay = endDate ? formatDateYMD(endDate) : '';
       // Choose fetch URL: NASA APOD API if api key provided, otherwise static JSON
       const apiKey = apiKeyInput && apiKeyInput.value.trim();
-      let fetchUrl = apodData;
+
+      // If we have a NASA API key, and a date range, request that range. Otherwise fall back to static JSON.
+      let items = [];
       if (apiKey) {
-        // Fetch one APOD item using the provided API key
-        fetchUrl = `https://api.nasa.gov/planetary/apod?api_key=${encodeURIComponent(apiKey)}`;
+        // Build NASA APOD URL. If we have a start & end, use start_date/end_date (returns array).
+        let fetchUrl = `https://api.nasa.gov/planetary/apod?api_key=${encodeURIComponent(apiKey)}`;
+        if (startDate && endDate) {
+          fetchUrl += `&start_date=${formatDateYMD(startDate)}&end_date=${formatDateYMD(endDate)}`;
+        } else if (startDate && !endDate) {
+          fetchUrl += `&date=${formatDateYMD(startDate)}`;
+        }
+
+        const response = await fetch(fetchUrl);
+        if (!response.ok) throw new Error(`Network error: ${response.status} ${response.statusText}`);
+        const data = await response.json();
+        items = Array.isArray(data) ? data : [data];
+
+      } else {
+        // Use bundled static JSON: fetch the file and then filter by date range if provided
+        const response = await fetch(apodData);
+        if (!response.ok) throw new Error(`Network error: ${response.status} ${response.statusText}`);
+        const data = await response.json();
+        let all = Array.isArray(data) ? data : [data];
+        if (startDate || endDate) {
+          // Filter between startDate and endDate (inclusive). If only one side defined, treat missing side as open.
+          items = all.filter((it) => {
+            if (!it.date) return false;
+            const d = parseAnyDate(it.date);
+            if (!d) return false;
+            if (startDate && d.getTime() < startDate.getTime()) return false;
+            if (endDate && d.getTime() > endDate.getTime()) return false;
+            return true;
+          });
+        } else {
+          items = all;
+        }
       }
 
-      const response = await fetch(fetchUrl);
-      if (!response.ok) {
-        throw new Error(`Network error: ${response.status} ${response.statusText}`);
+      // We need to present up to 9 items. If there are more than 9, pick 9 at random so user sees a sample from the range.
+      // Shuffle helper (Fisher-Yates) - will randomize order in-place.
+      function shuffleInPlace(arr) {
+        for (let i = arr.length - 1; i > 0; i--) {
+          const j = Math.floor(Math.random() * (i + 1));
+          [arr[i], arr[j]] = [arr[j], arr[i]];
+        }
+        return arr;
       }
 
-      const data = await response.json();
-      // Normalize data to an array so renderGallery can handle single or multiple results
-      const items = Array.isArray(data) ? data : [data];
+      const desired = 9;
+      // Shuffle items so each fetch has a randomized order. Then take up to `desired` items.
+      if (items && items.length > 0) {
+        shuffleInPlace(items);
+        if (items.length > desired) items = items.slice(0, desired);
+      }
 
-      renderGallery(items, gallery);
+      // If there are no items in the chosen range, show a helpful message including the requested range
+      console.debug('APOD: items found', items.length, 'for range', startDisplay, endDisplay);
+      if (!items || items.length === 0) {
+        gallery.innerHTML = `
+          <div class="placeholder">
+            <p>No images found for the selected date range (${startDisplay || 'any'} — ${endDisplay || 'any'}). Try a wider range or remove the dates.</p>
+          </div>
+        `;
+      } else {
+        renderGallery(items, gallery);
+        // Insert a small results info line at the top of the gallery so users know how many images were shown
+        try {
+          const infoText = `Showing ${items.length} image${items.length === 1 ? '' : 's'} from ${startDisplay || 'any'} — ${endDisplay || 'any'}`;
+          const infoEl = document.createElement('div');
+          infoEl.className = 'results-info';
+          infoEl.textContent = infoText;
+          gallery.insertAdjacentElement('afterbegin', infoEl);
+        } catch (e) {
+          // non-fatal
+          console.debug('Could not insert results info', e);
+        }
+      }
     } catch (err) {
       gallery.innerHTML = `
         <div class="placeholder">
@@ -92,6 +208,26 @@ document.addEventListener('DOMContentLoaded', () => {
     }
   });
 });
+
+/* Helper: format a date string to 'Month day, Year' (e.g. "October 30, 2025").
+   Accepts ISO strings, YYYY-MM-DD, or other Date-parsable values. Returns original
+   value if parsing fails. */
+function formatDateDisplay(dateStr) {
+  if (!dateStr) return '';
+  // Try Date parsing first
+  let d = new Date(dateStr);
+  if (isNaN(d.getTime())) {
+    // Try YYYY-MM-DD specifically
+    const m = /^(\d{4})-(\d{2})-(\d{2})/.exec(dateStr);
+    if (m) {
+      d = new Date(Date.UTC(Number(m[1]), Number(m[2]) - 1, Number(m[3])));
+    }
+  }
+
+  if (isNaN(d.getTime())) return dateStr; // fallback
+
+  return d.toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+}
 
 /**
  * Render a gallery of APOD items into the given container.
@@ -114,7 +250,8 @@ function renderGallery(items, container) {
   items.forEach((item) => {
     // Read values with safe defaults
     const title = item.title || 'Untitled';
-    const date = item.date || '';
+  const rawDate = item.date || '';
+  const date = formatDateDisplay(rawDate);
     const mediaType = item.media_type || 'image';
     const url = item.hdurl || item.url || '';
 
@@ -142,10 +279,11 @@ function renderGallery(items, container) {
 
     // Store explanation text and full-size url on the DOM node dataset so the modal can use them.
     // Using dataset keeps template markup simple and avoids HTML injection risks.
-    card.dataset.explanation = item.explanation || '';
-    card.dataset.fullUrl = url || '';
-    card.dataset.title = title;
-    card.dataset.date = date;
+  card.dataset.explanation = item.explanation || '';
+  card.dataset.fullUrl = url || '';
+  card.dataset.title = title;
+  // Store the formatted display date so modal shows the friendly format
+  card.dataset.date = date;
 
     // When a user clicks a gallery card, open the modal with the larger image + details.
     card.addEventListener('click', () => {

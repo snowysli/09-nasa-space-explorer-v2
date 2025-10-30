@@ -50,6 +50,22 @@ h1 {
   padding: 0 20px;
 }
 
+.date-controls {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+}
+.date-controls label {
+  font-size: 14px;
+  color: #444;
+}
+.date-controls input[type="date"] {
+  padding: 8px 10px;
+  font-size: 14px;
+  border-radius: 6px;
+  border: 1px solid #d6e3f3;
+}
+
 /* Inputs and buttons */
 input[type="date"],
 button {
@@ -126,19 +142,20 @@ button:hover {
 
 /* Hover/interaction: smooth scale effect for gallery images */
 .gallery-item img {
-  transition: transform 300ms cubic-bezier(.2,.9,.2,1), box-shadow 300ms ease, filter 300ms ease;
+  transition: transform 340ms cubic-bezier(.2,.9,.2,1), box-shadow 340ms ease, filter 340ms ease;
   will-change: transform, filter;
   backface-visibility: hidden;
   transform-origin: center center;
 }
 .gallery-item:hover img,
 .gallery-item:focus img {
-  transform: scale(1.12) translateZ(0);
-  filter: brightness(1.06) saturate(1.04);
+  /* More pronounced scale for a clearer hover state */
+  transform: scale(1.20) translateZ(0);
+  filter: brightness(1.08) saturate(1.06);
 }
 .gallery-item:hover {
-  box-shadow: 0 14px 46px rgba(16, 40, 70, 0.18);
-  transform: translateY(-2px);
+  box-shadow: 0 20px 60px rgba(16, 40, 70, 0.22);
+  transform: translateY(-6px);
 }
 
 /* Keyboard focus styling for accessibility */
@@ -193,6 +210,15 @@ button:hover {
 }
 .did-you-know .fact-text {
   color: #23385a;
+}
+
+/* Small info line shown when results are displayed */
+.results-info {
+  width: 100%;
+  text-align: center;
+  font-size: 14px;
+  color: #234;
+  padding: 8px 0 0 0;
 }
 
 
